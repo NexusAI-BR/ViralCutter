@@ -1,0 +1,93 @@
+/* ViralCutter Premium Theme - Modern Dark / Glassmorphism */
+
+:root {
+    --primary-color: #ff6a00; /* Vibrant Orange */
+    --secondary-color: #00d2ff; /* Cyber Blue */
+    --bg-dark: #0f0f12;
+    --card-bg: rgba(30, 30, 35, 0.7);
+    --border-color: rgba(255, 255, 255, 0.1);
+    --text-main: #e0e0e0;
+    --text-dim: #a0a0a0;
+}
+
+/* Global Styles */
+body, .gradio-container {
+    background-color: var(--bg-dark) !important;
+    font-family: 'Inter', 'Outfit', sans-serif !important;
+    background-image: 
+        radial-gradient(circle at 20% 20%, rgba(255, 106, 0, 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 80% 80%, rgba(0, 210, 255, 0.05) 0%, transparent 40%) !important;
+}
+
+/* Glassmorphism Cards */
+.gradio-container .gr-group, .gradio-container .gr-box, .gradio-container .gr-panel {
+    background: var(--card-bg) !important;
+    backdrop-filter: blur(10px) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 16px !important;
+    padding: 20px !important;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Buttons */
+.gradio-container button.primary {
+    background: linear-gradient(135deg, #ff6a00 0%, #ee0979 100%) !important;
+    border: none !important;
+    border-radius: 12px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 1px !important;
+    transition: all 0.3s ease !important;
+    box-shadow: 0 4px 15px rgba(255, 106, 0, 0.3) !important;
+}
+
+.gradio-container button.primary:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 6px 20px rgba(255, 106, 0, 0.5) !important;
+}
+
+/* Inputs */
+.gradio-container input, .gradio-container textarea, .gradio-container select {
+    background-color: rgba(255, 255, 255, 0.05) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 8px !important;
+    color: white !important;
+}
+
+.gradio-container input:focus {
+    border-color: var(--primary-color) !important;
+    box-shadow: 0 0 0 2px rgba(255, 106, 0, 0.2) !important;
+}
+
+/* Tabs */
+.gradio-container .tabs {
+    border-bottom: 2px solid var(--border-color) !important;
+}
+
+.gradio-container .tab-nav button {
+    color: var(--text-dim) !important;
+    font-weight: 600 !important;
+}
+
+.gradio-container .tab-nav button.selected {
+    color: var(--primary-color) !important;
+    border-bottom: 3px solid var(--primary-color) !important;
+}
+
+/* Log Box Customization */
+#logs_output textarea {
+    background: #000 !important;
+    color: #0f0 !important; /* Matrix Green */
+    font-family: 'Fira Code', 'Courier New', monospace !important;
+    border: 1px solid #333 !important;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.gradio-container > div {
+    animation: fadeIn 0.5s ease-out;
+}

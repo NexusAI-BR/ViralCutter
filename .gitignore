@@ -1,0 +1,8 @@
+VIRALS/
+models/
+.venv/
+__pycache__/
+*.db
+debug_colors.log
+temp_subtitle_config.json
+api_config.json
