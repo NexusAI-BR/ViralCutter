@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import time
+from difflib import SequenceMatcher
 from concurrent.futures import ThreadPoolExecutor
 import ast
 import io
@@ -334,6 +335,103 @@ def _is_sentence_end(text):
         return False
     return bool(re.search(r'[.!?…]["\')\]]*\s*$', text.strip()))
 
+def _normalize_match_text(text):
+    if not text:
+        return ""
+    text = text.lower().strip()
+    text = re.sub(r'[^\w\s]', ' ', text)
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
+
+def _score_text_match(target_text, candidate_text):
+    target_norm = _normalize_match_text(target_text)
+    candidate_norm = _normalize_match_text(candidate_text)
+    if not target_norm or not candidate_norm:
+        return 0.0
+
+    if target_norm in candidate_norm or candidate_norm in target_norm:
+        return 1.0
+
+    target_tokens = target_norm.split()
+    candidate_tokens = candidate_norm.split()
+    if not target_tokens or not candidate_tokens:
+        return 0.0
+
+    overlap = len(set(target_tokens) & set(candidate_tokens)) / max(1, len(set(target_tokens)))
+    ratio = SequenceMatcher(None, target_norm, candidate_norm).ratio()
+
+    if len(target_tokens) >= 3 and len(candidate_tokens) >= 3:
+        prefix = 1.0 if target_tokens[:3] == candidate_tokens[:3] else 0.0
+        suffix = 1.0 if target_tokens[-3:] == candidate_tokens[-3:] else 0.0
+    else:
+        prefix = 0.0
+        suffix = 0.0
+
+    return max(ratio, overlap, 0.85 * overlap + 0.15 * max(prefix, suffix))
+
+
+def _find_text_window_match(transcript_segments, target_text, search_start, search_limit, anchor="start"):
+    target_norm = _normalize_match_text(target_text)
+    if not target_norm:
+        return -1
+
+    total = len(transcript_segments)
+    search_start = max(0, search_start)
+    search_limit = min(total, search_limit)
+    best_idx = -1
+    best_score = 0.0
+
+    for i in range(search_start, search_limit):
+        combined_parts = []
+        for window_size in range(1, 4):
+            idx = i + window_size - 1
+            if idx >= search_limit:
+                break
+            combined_parts.append(transcript_segments[idx].get('text', ''))
+            candidate_text = " ".join(combined_parts)
+            score = _score_text_match(target_norm, candidate_text)
+            if score > best_score:
+                best_score = score
+                best_idx = i if anchor == "start" else idx
+            if score >= 0.98:
+                return best_idx
+
+    return best_idx if best_score >= 0.55 else -1
+
+
+def _find_natural_end_idx(transcript_segments, start_idx, min_duration, max_duration):
+    if not transcript_segments:
+        return start_idx
+
+    total = len(transcript_segments)
+    start_idx = max(0, min(start_idx, total - 1))
+    start_time = transcript_segments[start_idx]['start']
+    hard_min = max(0, min_duration or 0)
+    target_duration = min(max_duration, max(hard_min, 45 if hard_min <= 0 else hard_min))
+
+    best_idx = start_idx
+    last_boundary_idx = -1
+    last_boundary_after_target = -1
+
+    for idx in range(start_idx, total):
+        duration = transcript_segments[idx]['end'] - start_time
+        if duration > max_duration:
+            break
+        best_idx = idx
+        if _is_sentence_end(transcript_segments[idx].get('text', '')):
+            last_boundary_idx = idx
+            if duration >= target_duration:
+                last_boundary_after_target = idx
+                break
+
+    if last_boundary_after_target != -1:
+        return last_boundary_after_target
+    if last_boundary_idx != -1:
+        return last_boundary_idx
+    return best_idx
+
+
 def _expand_segment_for_context(transcript_segments, start_idx, end_idx, min_duration, max_duration):
     """
     Expand candidate segment to improve narrative completeness:
@@ -354,8 +452,8 @@ def _expand_segment_for_context(transcript_segments, start_idx, end_idx, min_dur
     dynamic_mode = (min_duration is None or min_duration <= 0)
     hard_min = max(0, min_duration or 0)
     # Soft target only for dynamic mode, not a hard rule.
-    soft_target = min(max_duration, 18)
-    preferred_min = min(max_duration, max(hard_min, 30))
+    soft_target = min(max_duration, 60)
+    preferred_min = min(max_duration, max(hard_min, 50))
     lead_in_cap = 6.0
 
     # 1) Pull back a little for context if possible.
@@ -457,56 +555,52 @@ def process_segments(raw_segments, transcript_segments, min_duration, max_durati
             # Backtrack
             start_idx = max(0, start_idx - 5)
             
-            # 2. Find Exact Start Text
-            start_text_target = seg.get('start_text', '').lower().strip()
-            # Normalize
-            start_text_target = re.sub(r'[^\w\s]', '', start_text_target)
-            
             final_start_time = -1
             match_start_idx = -1
             
             # Search window
             search_limit = min(len(transcript_segments), start_idx + 50)
-            
-            for i in range(start_idx, search_limit):
-                s_text = transcript_segments[i]['text'].lower()
-                s_text = re.sub(r'[^\w\s]', '', s_text)
-                
-                # Check for partial match
-                if start_text_target and (start_text_target in s_text or s_text in start_text_target):
-                    final_start_time = transcript_segments[i]['start']
-                    match_start_idx = i
-                    break
+
+            match_start_idx = _find_text_window_match(
+                transcript_segments,
+                seg.get('start_text', ''),
+                start_idx,
+                search_limit,
+                anchor="start"
+            )
+            if match_start_idx != -1:
+                final_start_time = transcript_segments[match_start_idx]['start']
             
             # Fallback
             if final_start_time == -1:
                 final_start_time = transcript_segments[start_idx]['start'] if start_idx < len(transcript_segments) else ref_time_val
                 match_start_idx = start_idx
 
-            # 3. Find End Text
-            end_text_target = seg.get('end_text', '').lower().strip()
-            end_text_target = re.sub(r'[^\w\s]', '', end_text_target)
-            
             final_end_time = -1
             match_end_idx = -1
             
             if match_start_idx != -1:
                 search_end_limit = min(len(transcript_segments), match_start_idx + 200)
-                
-                for i in range(match_start_idx, search_end_limit):
-                    s_text = transcript_segments[i]['text'].lower()
-                    s_text = re.sub(r'[^\w\s]', '', s_text)
-                    
-                    if end_text_target and (end_text_target in s_text or s_text in end_text_target):
-                         final_end_time = transcript_segments[i]['end']
-                         match_end_idx = i
-                         break
+
+                match_end_idx = _find_text_window_match(
+                    transcript_segments,
+                    seg.get('end_text', ''),
+                    match_start_idx,
+                    search_end_limit,
+                    anchor="end"
+                )
+                if match_end_idx != -1:
+                    final_end_time = transcript_segments[match_end_idx]['end']
             
             # Fallback End Time
             if final_end_time == -1:
-                 fallback_window = 12.0 if tempo_minimo <= 0 else float(tempo_minimo)
-                 final_end_time = final_start_time + fallback_window
-                 match_end_idx = min(len(transcript_segments) - 1, max(match_start_idx, start_idx) + 3)
+                 match_end_idx = _find_natural_end_idx(
+                     transcript_segments,
+                     max(match_start_idx, start_idx),
+                     tempo_minimo,
+                     tempo_maximo
+                 )
+                 final_end_time = transcript_segments[match_end_idx]['end']
 
             # 3.5 Expand for narrative completeness (start-middle-end)
             if match_start_idx == -1:
